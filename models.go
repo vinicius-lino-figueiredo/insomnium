@@ -67,30 +67,46 @@ type Project struct {
 }
 
 // Request represents a record of the insomnia.Request.db file.
-type Request struct {
-	ID             string   `json:"_id"`
-	Authentication struct{} `json:"authentication"`
-	Body           struct{} `json:"body"`
-	Created        int      `json:"created"`
-	Description    string   `json:"description"`
-	Headers        []struct {
+type Request []struct {
+	ID             string `json:"_id"`
+	Authentication struct {
+		Disabled    bool   `json:"disabled"`
+		Password    string `json:"password"`
+		Type        string `json:"type,omitempty"`
+		UseIso88591 bool   `json:"useISO88591"`
+		Username    string `json:"username"`
+	} `json:"authentication"`
+	Body struct {
+		MimeType string `json:"mimeType,omitempty"`
+		Text     string `json:"text,omitempty"`
+	} `json:"body"`
+	Created     int    `json:"created"`
+	Description string `json:"description"`
+	Headers     []struct {
+		ID    string `json:"id,omitempty"`
 		Name  string `json:"name"`
 		Value string `json:"value"`
 	} `json:"headers"`
-	IsPrivate                       bool    `json:"isPrivate"`
-	MetaSortKey                     float64 `json:"metaSortKey"`
-	Method                          string  `json:"method"`
-	Modified                        int     `json:"modified"`
-	Name                            string  `json:"name"`
-	Parameters                      []any   `json:"parameters"`
-	ParentID                        string  `json:"parentId"`
-	SegmentParams                   []any   `json:"segmentParams"`
-	SettingDisableRenderRequestBody bool    `json:"settingDisableRenderRequestBody"`
-	SettingEncodeURL                bool    `json:"settingEncodeUrl"`
-	SettingFollowRedirects          string  `json:"settingFollowRedirects"`
-	SettingRebuildPath              bool    `json:"settingRebuildPath"`
-	SettingSendCookies              bool    `json:"settingSendCookies"`
-	SettingStoreCookies             bool    `json:"settingStoreCookies"`
-	Type                            string  `json:"type"`
-	URL                             string  `json:"url"`
+	IsPrivate   bool    `json:"isPrivate"`
+	MetaSortKey float64 `json:"metaSortKey"`
+	Method      string  `json:"method"`
+	Modified    int     `json:"modified"`
+	Name        string  `json:"name"`
+	Parameters  []struct {
+		Description string `json:"description"`
+		Disabled    bool   `json:"disabled"`
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Value       string `json:"value"`
+	} `json:"parameters"`
+	ParentID                        string `json:"parentId"`
+	SegmentParams                   []any  `json:"segmentParams"`
+	SettingDisableRenderRequestBody bool   `json:"settingDisableRenderRequestBody"`
+	SettingEncodeURL                bool   `json:"settingEncodeUrl"`
+	SettingFollowRedirects          string `json:"settingFollowRedirects"`
+	SettingRebuildPath              bool   `json:"settingRebuildPath"`
+	SettingSendCookies              bool   `json:"settingSendCookies"`
+	SettingStoreCookies             bool   `json:"settingStoreCookies"`
+	Type                            string `json:"type"`
+	URL                             string `json:"url"`
 }
