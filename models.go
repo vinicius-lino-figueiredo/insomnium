@@ -67,7 +67,7 @@ type Project struct {
 }
 
 // Request represents a record of the insomnia.Request.db file.
-type Request []struct {
+type Request struct {
 	ID             string `json:"_id"`
 	Authentication struct {
 		Disabled    bool   `json:"disabled"`
