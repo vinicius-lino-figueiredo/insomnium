@@ -69,22 +69,12 @@ func (i *Insomnium) LoadWorkspaces() (err error) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
 
-	r := bufio.NewScanner(f)
-
-	var Workspaces []Workspace
-	for r.Scan() {
-		if err = r.Err(); err != nil {
-			return
-		}
-		var w Workspace
-		err = i.unmarshaler.Unmarshal(r.Bytes(), &w)
-		if err != nil {
-			return
-		}
-		Workspaces = append(Workspaces, w)
+	Workspaces, err := unmarshalLines[Workspace](f, i.unmarshaler)
+	if err != nil {
+		return
 	}
+
 	i.Workspaces = Workspaces
 	return
 }
@@ -97,22 +87,12 @@ func (i *Insomnium) LoadRequestGroups() (err error) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
 
-	r := bufio.NewScanner(f)
-
-	var RequestGroups []RequestGroup
-	for r.Scan() {
-		if err = r.Err(); err != nil {
-			return
-		}
-		var w RequestGroup
-		err = i.unmarshaler.Unmarshal(r.Bytes(), &w)
-		if err != nil {
-			return
-		}
-		RequestGroups = append(RequestGroups, w)
+	RequestGroups, err := unmarshalLines[RequestGroup](f, i.unmarshaler)
+	if err != nil {
+		return
 	}
+
 	i.RequestGroups = RequestGroups
 	return
 }
@@ -125,22 +105,12 @@ func (i *Insomnium) LoadResponses() (err error) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
 
-	r := bufio.NewScanner(f)
-
-	var Responses []Response
-	for r.Scan() {
-		if err = r.Err(); err != nil {
-			return
-		}
-		var w Response
-		err = i.unmarshaler.Unmarshal(r.Bytes(), &w)
-		if err != nil {
-			return
-		}
-		Responses = append(Responses, w)
+	Responses, err := unmarshalLines[Response](f, i.unmarshaler)
+	if err != nil {
+		return
 	}
+
 	i.Responses = Responses
 	return
 }
@@ -153,22 +123,12 @@ func (i *Insomnium) LoadProjects() (err error) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
 
-	r := bufio.NewScanner(f)
-
-	var Projects []Project
-	for r.Scan() {
-		if err = r.Err(); err != nil {
-			return
-		}
-		var w Project
-		err = i.unmarshaler.Unmarshal(r.Bytes(), &w)
-		if err != nil {
-			return
-		}
-		Projects = append(Projects, w)
+	Projects, err := unmarshalLines[Project](f, i.unmarshaler)
+	if err != nil {
+		return
 	}
+
 	i.Projects = Projects
 	return
 }
@@ -181,24 +141,32 @@ func (i *Insomnium) LoadRequests() (err error) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
 
-	r := bufio.NewScanner(f)
+	Requests, err := unmarshalLines[Request](f, i.unmarshaler)
+	if err != nil {
+		return
+	}
 
-	var Requests []Request
-	for r.Scan() {
-		if err = r.Err(); err != nil {
+	i.Requests = Requests
+	return
+}
+
+func unmarshalLines[T any](r io.ReadCloser, u Unmarshaler) (ts []T, err error) {
+	defer r.Close()
+
+	var s = bufio.NewScanner(r)
+	for s.Scan() {
+		if err = s.Err(); err != nil {
 			return
 		}
-		var w Request
-		err = i.unmarshaler.Unmarshal(r.Bytes(), &w)
+		var t T
+		err = u.Unmarshal(s.Bytes(), &t)
 		if err != nil {
 			return
 		}
-		Requests = append(Requests, w)
+		ts = append(ts, t)
 	}
-	i.Requests = Requests
-	return
+	return ts, nil
 }
 
 // Unmarshaler is used to decode each line in the Insomnium db files.

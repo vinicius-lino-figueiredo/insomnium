@@ -70,22 +70,32 @@ type Project struct {
 type Request struct {
 	ID             string `json:"_id"`
 	Authentication struct {
-		Disabled    bool   `json:"disabled"`
-		Password    string `json:"password"`
-		Type        string `json:"type,omitempty"`
-		UseIso88591 bool   `json:"useISO88591"`
-		Username    string `json:"username"`
+		AccessTokenURL    string `json:"accessTokenUrl,omitempty"`
+		AuthorizationURL  string `json:"authorizationUrl"`
+		ClientID          string `json:"clientId,omitempty"`
+		ClientSecret      string `json:"clientSecret,omitempty"`
+		CredentialsInBody bool   `json:"credentialsInBody"`
+		Disabled          bool   `json:"disabled"`
+		GrantType         string `json:"grantType,omitempty"`
+		Password          string `json:"password"`
+		Scope             string `json:"scope"`
+		TokenPrefix       string `json:"tokenPrefix,omitempty"`
+		Type              string `json:"type,omitempty"`
+		UseIso88591       bool   `json:"useISO88591"`
+		Username          string `json:"username"`
 	} `json:"authentication"`
 	Body struct {
-		MimeType string `json:"mimeType,omitempty"`
-		Text     string `json:"text,omitempty"`
+		MimeType string `json:"mimeType"`
+		Text     string `json:"text"`
 	} `json:"body"`
 	Created     int    `json:"created"`
 	Description string `json:"description"`
 	Headers     []struct {
-		ID    string `json:"id,omitempty"`
-		Name  string `json:"name"`
-		Value string `json:"value"`
+		Description string `json:"description"`
+		Disabled    bool   `json:"disabled"`
+		ID          string `json:"id,omitempty"`
+		Name        string `json:"name"`
+		Value       string `json:"value"`
 	} `json:"headers"`
 	IsPrivate   bool    `json:"isPrivate"`
 	MetaSortKey float64 `json:"metaSortKey"`
@@ -100,6 +110,7 @@ type Request struct {
 		Value       string `json:"value"`
 	} `json:"parameters"`
 	ParentID                        string `json:"parentId"`
+	PathParameters                  []any  `json:"pathParameters"`
 	SegmentParams                   []any  `json:"segmentParams"`
 	SettingDisableRenderRequestBody bool   `json:"settingDisableRenderRequestBody"`
 	SettingEncodeURL                bool   `json:"settingEncodeUrl"`
