@@ -1,58 +1,220 @@
 package insomnium
 
 import (
-	"bufio"
+	"context"
+	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/noirbizarre/gonja"
 )
+
+// Insomnium loads and stores information read from the insomnia.*.db files.
+type Insomnium struct {
+	path           string
+	responsesDir   string
+	prefix         string
+	suffix         string
+	cl             *http.Client
+	transport      *http.Transport
+	workspaces     *Repository[Workspace]
+	requestGroups  *Repository[RequestGroup]
+	responses      *Repository[Response]
+	projects       *Repository[Project]
+	requests       *Repository[Request]
+	cookieJars     *Repository[CookieJar]
+	environments   *Repository[Environment]
+	workspaceMetas *Repository[WorkspaceMeta]
+	settings       *Repository[Settings]
+}
 
 // NewInsomnium creates an empty instance of *Insomnium, a type that should
 // store information from the Insomnium db files. It loads a file reader
 // interface that uses the package os to read the insomnia.*.db files and a json
 // unmarshaler that uses the standard package encoding/json. Options can be used
 // to mock the file reading and unmarshaling process.
-func NewInsomnium(path string, options ...Option) *Insomnium {
+func NewInsomnium(path, prefix, suffix string) (*Insomnium, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+
+	transport := &http.Transport{TLSClientConfig: &tls.Config{}}
+
 	i := Insomnium{
-		path:        path,
-		fileReader:  NewDefaultFileReader(),
-		unmarshaler: NewDefaultUnmarshaler(),
+		cl:           &http.Client{Transport: transport},
+		transport:    transport,
+		path:         path,
+		responsesDir: filepath.Join(path, "responses"),
+		prefix:       prefix,
+		suffix:       suffix,
 	}
-	for _, option := range options {
-		option(&i)
+
+	err = i.createDatabases(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	return &i
+
+	return &i, nil
 }
 
-// Insomnium loads and stores information read from the insomnia.*.db files.
-type Insomnium struct {
-	path          string
-	unmarshaler   Unmarshaler
-	fileReader    FileReader
-	Workspaces    []Workspace
-	RequestGroups []RequestGroup
-	Responses     []Response
-	Projects      []Project
-	Requests      []Request
+// GetProjects lists all projects.
+func (i *Insomnium) GetProjects(ctx context.Context) ([]Project, error) {
+	return i.projects.All(ctx)
+}
+
+// GetChildWorkspaces lists all workspaces for a given project.
+func (i *Insomnium) GetChildWorkspaces(ctx context.Context, parent string) ([]Workspace, error) {
+	if parent != "" {
+		return i.workspaces.GetChildren(ctx, parent)
+	}
+	return i.workspaces.All(ctx)
+}
+
+// GetChildRequestGroups lists all request groups for a given parent, which can
+// be either a workspace or another request group.
+func (i *Insomnium) GetChildRequestGroups(ctx context.Context, parent string) ([]RequestGroup, error) {
+	if parent != "" {
+		return i.requestGroups.GetChildren(ctx, parent)
+	}
+	return i.requestGroups.All(ctx)
+}
+
+// GetChildRequests returns all requests for a given parent, which can be either
+// a workspace or a request group.
+func (i *Insomnium) GetChildRequests(ctx context.Context, parent string) ([]Request, error) {
+	if parent != "" {
+		return i.requests.GetChildren(ctx, parent)
+	}
+	return i.requests.All(ctx)
+}
+
+// GetRequestWorkspace returns the workspace ancestor of a given request. Since
+// the request could be nested within multiple request groups, the ancestor
+// workspace may not be the parent of the request.
+func (i *Insomnium) GetRequestWorkspace(ctx context.Context, id string) (string, error) {
+	// following req groups until we find one with a non req group parent,
+	// which should be a workspace instead.
+	for len(id) > 4 && id[:4] == "fld_" {
+		fld, err := i.requestGroups.Get(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		id = fld.ParentID
+	}
+	return id, nil
+}
+
+// GetChildWorkspaceMeta returns the metadata of a given workspace.
+func (i *Insomnium) GetChildWorkspaceMeta(ctx context.Context, parent string) (WorkspaceMeta, error) {
+	return i.workspaceMetas.GetChild(ctx, parent)
+}
+
+// GetResponse returns the response and its body.
+func (i *Insomnium) GetResponse(ctx context.Context, id string) (Response, io.ReadCloser, error) {
+	res, err := i.responses.Get(ctx, id)
+	if err != nil {
+		return res, nil, err
+	}
+	f, err := os.Open(res.BodyPath)
+	if err != nil {
+		return res, nil, err
+	}
+	return res, f, nil
+}
+
+func (i *Insomnium) getOrCreateSettings(ctx context.Context) (s Settings, err error) {
+	settings, err := i.settings.All(ctx)
+	if err != nil {
+		return s, err
+	}
+
+	if len(settings) == 0 {
+		return s, fmt.Errorf("insomnium package does not create settings yet: %w", errors.ErrUnsupported)
+	}
+
+	return settings[0], nil
+}
+
+func (i *Insomnium) createDatabases(ctx context.Context) error {
+
+	var err error
+
+	file := filepath.Join(i.path, i.prefix+"Workspace"+i.suffix)
+	i.workspaces, err = NewRepository[Workspace](ctx, file, false, 16)
+	if err != nil {
+		return err
+	}
+
+	file = filepath.Join(i.path, i.prefix+"RequestGroup"+i.suffix)
+	i.requestGroups, err = NewRepository[RequestGroup](ctx, file, false, 16)
+	if err != nil {
+		return err
+	}
+
+	file = filepath.Join(i.path, i.prefix+"Response"+i.suffix)
+	i.responses, err = NewRepository[Response](ctx, file, false, 16)
+	if err != nil {
+		return err
+	}
+
+	file = filepath.Join(i.path, i.prefix+"Project"+i.suffix)
+	i.projects, err = NewRepository[Project](ctx, file, false, 16)
+	if err != nil {
+		return err
+	}
+
+	file = filepath.Join(i.path, i.prefix+"Request"+i.suffix)
+	i.requests, err = NewRepository[Request](ctx, file, false, 16)
+	if err != nil {
+		return err
+	}
+
+	file = filepath.Join(i.path, i.prefix+"Environment"+i.suffix)
+	i.environments, err = NewRepository[Environment](ctx, file, false, 16)
+	if err != nil {
+		return err
+	}
+
+	file = filepath.Join(i.path, i.prefix+"WorkspaceMeta"+i.suffix)
+	i.workspaceMetas, err = NewRepository[WorkspaceMeta](ctx, file, false, 16)
+	if err != nil {
+		return err
+	}
+
+	file = filepath.Join(i.path, i.prefix+"Settings"+i.suffix)
+	i.settings, err = NewRepository[Settings](ctx, file, false, 16)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Load reads all of the db files and stores the results. It returns the list of
 // errors if it fails in reading or unmarshaling any of the files.
 func (i *Insomnium) Load() (err error) {
 	var errs []error
-	if err = i.LoadWorkspaces(); err != nil {
+	if err = i.workspaces.Load(); err != nil {
 		errs = append(errs, err)
 	}
-	if err = i.LoadRequestGroups(); err != nil {
+	if err = i.requestGroups.Load(); err != nil {
 		errs = append(errs, err)
 	}
-	if err = i.LoadResponses(); err != nil {
+	if err = i.responses.Load(); err != nil {
 		errs = append(errs, err)
 	}
-	if err = i.LoadProjects(); err != nil {
+	if err = i.projects.Load(); err != nil {
 		errs = append(errs, err)
 	}
-	if err = i.LoadRequests(); err != nil {
+	if err = i.requests.Load(); err != nil {
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
@@ -61,120 +223,198 @@ func (i *Insomnium) Load() (err error) {
 	return
 }
 
-// LoadWorkspaces loads and unmarshals all of the records in the
-// insomnia.Workspaces.db file or retorns an error.
-func (i *Insomnium) LoadWorkspaces() (err error) {
-	path := filepath.Join(i.path, "insomnia.Workspace.db")
-	f, err := i.fileReader.ReadFile(path)
+// DoRequest does a request, stores the response and returns the response ID.
+func (i *Insomnium) DoRequest(ctx context.Context, id string) (string, error) {
+
+	ref, err := i.requests.Get(ctx, id)
 	if err != nil {
-		return
+		return "", err
 	}
 
-	Workspaces, err := unmarshalLines[Workspace](f, i.unmarshaler)
+	wrk, err := i.GetRequestWorkspace(ctx, ref.ParentID)
 	if err != nil {
-		return
+		return "", err
 	}
 
-	i.Workspaces = Workspaces
-	return
-}
-
-// LoadRequestGroups loads and unmarshals all of the records in the
-// insomnia.RequestGroups.db file or retorns an error.
-func (i *Insomnium) LoadRequestGroups() (err error) {
-	path := filepath.Join(i.path, "insomnia.RequestGroup.db")
-	f, err := i.fileReader.ReadFile(path)
+	meta, err := i.GetChildWorkspaceMeta(ctx, wrk)
 	if err != nil {
-		return
+		return "", err
 	}
 
-	RequestGroups, err := unmarshalLines[RequestGroup](f, i.unmarshaler)
+	req, err := i.createRequest(ctx, ref, wrk, meta.ActiveEnvironmentID)
 	if err != nil {
-		return
+		return "", err
 	}
 
-	i.RequestGroups = RequestGroups
-	return
-}
+	now := time.Now()
 
-// LoadResponses loads and unmarshals all of the records in the
-// insomnia.Responses.db file or retorns an error.
-func (i *Insomnium) LoadResponses() (err error) {
-	path := filepath.Join(i.path, "insomnia.Response.db")
-	f, err := i.fileReader.ReadFile(path)
+	res, err := i.doRequest(ctx, req)
 	if err != nil {
-		return
+		return "", err
+	}
+	defer res.Body.Close()
+
+	then := time.Now()
+
+	random, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
 	}
 
-	Responses, err := unmarshalLines[Response](f, i.unmarshaler)
+	file := filepath.Join(i.responsesDir, random.String()+".response")
+
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
 	if err != nil {
-		return
+		return "", err
+	}
+	defer f.Close()
+
+	written, err := io.Copy(f, res.Body)
+	if err != nil {
+		return "", err
 	}
 
-	i.Responses = Responses
-	return
-}
-
-// LoadProjects loads and unmarshals all of the records in the
-// insomnia.Projects.db file or retorns an error.
-func (i *Insomnium) LoadProjects() (err error) {
-	path := filepath.Join(i.path, "insomnia.Project.db")
-	f, err := i.fileReader.ReadFile(path)
+	resID, err := i.generateID("res")
 	if err != nil {
-		return
+		return "", err
 	}
 
-	Projects, err := unmarshalLines[Project](f, i.unmarshaler)
-	if err != nil {
-		return
+	obj := Response{
+		ID:            resID,
+		ParentID:      id,
+		URL:           res.Request.URL.String(),
+		Modified:      int(now.Unix()),
+		StatusCode:    res.StatusCode,
+		ElapsedTime:   float64(then.Sub(now)) / float64(time.Second),
+		ContentType:   res.Header.Get("Content-Type"),
+		Created:       int(then.Unix()),
+		BytesContent:  int(written),
+		Headers:       make([]Header, 0, len(res.Header)),
+		EnvironmentID: meta.ActiveEnvironmentID,
+		BodyPath:      file,
 	}
 
-	i.Projects = Projects
-	return
-}
-
-// LoadRequests loads and unmarshals all of the records in the
-// insomnia.Requests.db file or retorns an error.
-func (i *Insomnium) LoadRequests() (err error) {
-	path := filepath.Join(i.path, "insomnia.Request.db")
-	f, err := i.fileReader.ReadFile(path)
-	if err != nil {
-		return
-	}
-
-	Requests, err := unmarshalLines[Request](f, i.unmarshaler)
-	if err != nil {
-		return
-	}
-
-	i.Requests = Requests
-	return
-}
-
-func unmarshalLines[T any](r io.ReadCloser, u Unmarshaler) (ts []T, err error) {
-	defer r.Close()
-
-	var s = bufio.NewScanner(r)
-	for s.Scan() {
-		if err = s.Err(); err != nil {
-			return
+	for k, values := range res.Header {
+		for _, v := range values {
+			obj.Headers = append(obj.Headers, Header{Name: k, Value: v})
 		}
-		var t T
-		err = u.Unmarshal(s.Bytes(), &t)
+	}
+
+	err = i.responses.Create(ctx, obj)
+	if err != nil {
+		return "", err
+	}
+
+	return resID, nil
+}
+
+func (i *Insomnium) doRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
+
+	settings, err := i.getOrCreateSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	i.transport.TLSClientConfig.InsecureSkipVerify = !settings.ValidateSSL
+
+	return i.cl.Do(req)
+}
+
+func (i *Insomnium) createRequest(ctx context.Context, ref Request, wrk string, env string) (*http.Request, error) {
+
+	// creating a template for the URL
+	tplEnvs, err := i.getEnvs(ctx, wrk, env)
+	if err != nil {
+		return nil, err
+	}
+
+	urlTpl, err := gonja.FromString(ref.URL)
+	if err != nil {
+		return nil, err
+	}
+
+	// applying the template
+	u, err := urlTpl.Execute(gonja.Context{"_": tplEnvs})
+	if err != nil {
+		return nil, err
+	}
+
+	body := strings.NewReader(ref.Body.Text)
+
+	req, err := http.NewRequestWithContext(ctx, ref.Method, u, body)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = i.setAuth(req, ref); err != nil {
+		return nil, err
+	}
+
+	return req, nil
+
+}
+
+func (i *Insomnium) getEnvs(ctx context.Context, key, activeEnv string) (gonja.Context, error) {
+	envs, err := i.environments.GetChildren(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	var tplEnvs gonja.Context
+	if len(envs) == 1 {
+		curr, err := i.environments.Get(ctx, activeEnv)
 		if err != nil {
-			return
+			return nil, err
 		}
-		ts = append(ts, t)
+
+		tplEnvs = make(gonja.Context, len(envs[0].Data))
+		for k, v := range envs[0].Data {
+			tplEnvs[k] = v
+		}
+
+		for k, v := range curr.Data {
+			tplEnvs[k] = v
+		}
 	}
-	return ts, nil
+	return tplEnvs, nil
 }
 
-// Unmarshaler is used to decode each line in the Insomnium db files.
-type Unmarshaler interface {
-	Unmarshal(data []byte, v any) error
+func (i *Insomnium) setAuth(req *http.Request, ref Request) error {
+	// TODO: add these:
+	// export const AUTH_API_KEY = 'apikey';
+	// export const AUTH_OAUTH_2 = 'oauth2';
+	// export const AUTH_OAUTH_1 = 'oauth1';
+	// export const AUTH_DIGEST = 'digest';
+	// export const AUTH_BEARER = 'bearer';
+	// export const AUTH_NTLM = 'ntlm';
+	// export const AUTH_HAWK = 'hawk';
+	// export const AUTH_AWS_IAM = 'iam';
+	// export const AUTH_NETRC = 'netrc';
+	// export const AUTH_ASAP = 'asap';
+	// export const HAWK_ALGORITHM_SHA256 = 'sha256';
+	// export const HAWK_ALGORITHM_SHA1 = 'sha1';
+
+	auth := ref.Authentication
+	switch ref.Authentication.Type {
+	case "basic":
+		req.SetBasicAuth(auth.Username, auth.Password)
+	case "none":
+		return nil
+	default:
+		return fmt.Errorf("for now, we only accept basic or nothing: %w", errors.ErrUnsupported)
+	}
+
+	return nil
 }
 
-// FileReader is used to access the db files content from os.
-type FileReader interface {
-	ReadFile(path string) (io.ReadCloser, error)
+func (i *Insomnium) generateID(prefix string) (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+
+	b := strings.ReplaceAll(id.String(), "-", "")
+	if prefix != "" {
+		return prefix + "_" + string(b), nil
+	}
+	return string(b), nil
 }
