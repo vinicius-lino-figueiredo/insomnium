@@ -62,20 +62,7 @@ func (r *Repository[T]) GetChildren(ctx context.Context, key string) ([]T, error
 		return nil, err
 	}
 
-	res := make([]T, 0, r.size)
-	for cur.Next() {
-		var t T
-		if err = cur.Scan(ctx, &t); err != nil {
-			return nil, err
-		}
-		res = append(res, t)
-	}
-
-	if cur.Err() != nil {
-		return nil, err
-	}
-
-	return res, err
+	return r.readCursor(ctx, cur)
 }
 
 // GetChild returns the first child of a parent ID. Fails if it finds zero.
@@ -99,24 +86,37 @@ func (r *Repository[T]) Remove(ctx context.Context, t T) error {
 	return err
 }
 
-// All returns all cached records.
-func (r *Repository[T]) All(ctx context.Context) ([]T, error) {
-	res := make([]T, 0, r.size)
-
-	cur, err := r.db.GetAllData(ctx)
+// Find returns a slice version of the cursor for a query.
+func (r *Repository[T]) Find(ctx context.Context, query any, opts ...gedb.FindOption) ([]T, error) {
+	cur, err := r.db.Find(ctx, query, opts...)
 	if err != nil {
 		return nil, err
 	}
 
+	return r.readCursor(ctx, cur)
+}
+
+// All returns all cached records.
+func (r *Repository[T]) All(ctx context.Context) ([]T, error) {
+	cur, err := r.db.GetAllData(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.readCursor(ctx, cur)
+
+}
+
+func (r *Repository[T]) readCursor(ctx context.Context, cur gedb.Cursor) ([]T, error) {
+	res := make([]T, 0, r.size)
 	for cur.Next() {
 		var t T
-		if err = cur.Scan(ctx, &t); err != nil {
+		if err := cur.Scan(ctx, &t); err != nil {
 			return nil, err
 		}
 		res = append(res, t)
 	}
 
-	if cur.Err() != nil {
+	if err := cur.Err(); err != nil {
 		return nil, err
 	}
 

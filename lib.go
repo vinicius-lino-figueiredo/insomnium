@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/noirbizarre/gonja"
+	"github.com/vinicius-lino-figueiredo/gedb"
+	"github.com/vinicius-lino-figueiredo/gedb/domain"
 )
 
 // Insomnium loads and stores information read from the insomnia.*.db files.
@@ -65,35 +67,29 @@ func NewInsomnium(path, prefix, suffix string) (*Insomnium, error) {
 	return &i, nil
 }
 
-// GetProjects lists all projects.
-func (i *Insomnium) GetProjects(ctx context.Context) ([]Project, error) {
+// GetAllProjects lists all projects.
+func (i *Insomnium) GetAllProjects(ctx context.Context) ([]Project, error) {
 	return i.projects.All(ctx)
+}
+
+// GetProject returns a specific project by its id.
+func (i *Insomnium) GetProject(ctx context.Context, id string) (Project, error) {
+	return i.projects.Get(ctx, id)
+}
+
+// GetAllWorkspaces lists all projects.
+func (i *Insomnium) GetAllWorkspaces(ctx context.Context) ([]Workspace, error) {
+	return i.workspaces.All(ctx)
 }
 
 // GetChildWorkspaces lists all workspaces for a given project.
 func (i *Insomnium) GetChildWorkspaces(ctx context.Context, parent string) ([]Workspace, error) {
-	if parent != "" {
-		return i.workspaces.GetChildren(ctx, parent)
-	}
-	return i.workspaces.All(ctx)
+	return i.workspaces.GetChildren(ctx, parent)
 }
 
-// GetChildRequestGroups lists all request groups for a given parent, which can
-// be either a workspace or another request group.
-func (i *Insomnium) GetChildRequestGroups(ctx context.Context, parent string) ([]RequestGroup, error) {
-	if parent != "" {
-		return i.requestGroups.GetChildren(ctx, parent)
-	}
-	return i.requestGroups.All(ctx)
-}
-
-// GetChildRequests returns all requests for a given parent, which can be either
-// a workspace or a request group.
-func (i *Insomnium) GetChildRequests(ctx context.Context, parent string) ([]Request, error) {
-	if parent != "" {
-		return i.requests.GetChildren(ctx, parent)
-	}
-	return i.requests.All(ctx)
+// GetWorkspace returns a specific workspace by its id.
+func (i *Insomnium) GetWorkspace(ctx context.Context, id string) (Workspace, error) {
+	return i.workspaces.Get(ctx, id)
 }
 
 // GetRequestWorkspace returns the workspace ancestor of a given request. Since
@@ -112,9 +108,61 @@ func (i *Insomnium) GetRequestWorkspace(ctx context.Context, id string) (string,
 	return id, nil
 }
 
+// GetAllRequestGroups returns all request groups.
+func (i *Insomnium) GetAllRequestGroups(ctx context.Context) ([]RequestGroup, error) {
+	return i.requestGroups.All(ctx)
+}
+
+// GetChildRequestGroups lists all request groups for a given parent, which can
+// be either a workspace or another request group.
+func (i *Insomnium) GetChildRequestGroups(ctx context.Context, parent string) ([]RequestGroup, error) {
+	return i.requestGroups.GetChildren(ctx, parent)
+}
+
+// GetRequestGroup returns a specific request group by its id.
+func (i *Insomnium) GetRequestGroup(ctx context.Context, id string) (RequestGroup, error) {
+	return i.requestGroups.Get(ctx, id)
+}
+
+// GetAllRequests returns all requests.
+func (i *Insomnium) GetAllRequests(ctx context.Context) ([]Request, error) {
+	return i.requests.All(ctx)
+}
+
+// GetChildRequests returns all requests for a given parent, which can be either
+// a workspace or a request group.
+func (i *Insomnium) GetChildRequests(ctx context.Context, parent string) ([]Request, error) {
+	return i.requests.GetChildren(ctx, parent)
+}
+
+// GetRequest returns a specific request by its id.
+func (i *Insomnium) GetRequest(ctx context.Context, id string) (Request, error) {
+	return i.requests.Get(ctx, id)
+}
+
 // GetChildWorkspaceMeta returns the metadata of a given workspace.
 func (i *Insomnium) GetChildWorkspaceMeta(ctx context.Context, parent string) (WorkspaceMeta, error) {
 	return i.workspaceMetas.GetChild(ctx, parent)
+}
+
+// GetLatestResponse TODO
+func (i *Insomnium) GetLatestResponse(ctx context.Context, id string) (*Response, io.ReadCloser, error) {
+	res, err := i.responses.Find(ctx,
+		map[string]any{"parentId": id},
+		domain.WithSort(gedb.Sort{{Key: "modified", Order: -1}}),
+		domain.WithLimit(1),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(res) == 0 {
+		return nil, nil, nil
+	}
+	f, err := os.Open(res[0].BodyPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &res[0], f, nil
 }
 
 // GetResponse returns the response and its body.
